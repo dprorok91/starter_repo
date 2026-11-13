@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "features": [
+    {
+      "id": "feature.greeting",
+      "title": "Consistent greetings across language examples",
+      "acceptance": [
+        {
+          "id": "acceptance.greeting.named",
+          "description": "Given a name with surrounding whitespace, return Hello, <trimmed name>!",
+          "symbols": ["examples/python310/demo.py::greet", "examples/javascript/src/greet.js::greet"],
+          "tests": ["examples/python310/tests/test_demo.py::GreetingTests.test_greeting", "examples/javascript/tests/greet.test.js::greeting trims the name"]
+        },
+        {
+          "id": "acceptance.greeting.empty",
+          "description": "Reject an empty or whitespace-only name.",
+          "symbols": ["examples/python310/demo.py::greet", "examples/javascript/src/greet.js::greet"],
+          "tests": ["examples/python310/tests/test_demo.py::GreetingTests.test_empty_name", "examples/javascript/tests/greet.test.js::empty names are rejected"]
+        },
+        {
+          "id": "acceptance.python.runtime",
+          "description": "The Python example runs under the minor version selected in its .python-version.",
+          "symbols": ["examples/python310/tests/test_demo.py::GreetingTests.test_selected_runtime"],
+          "tests": ["examples/python310/tests/test_demo.py::GreetingTests.test_selected_runtime"]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,167 @@
+name: Resolve agent issue
+
+on:
+  issues:
+    types: [opened, labeled, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  implement:
+    if: github.event.issue.state == 'open' && contains(github.event.issue.labels.*.name, 'agent:ready')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      has_patch: ${{ steps.capture.outputs.has_patch }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Skip issues with an existing open agent PR
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          count=$(gh pr list --head "agent/issue-$ISSUE_NUMBER" --state open --json number --jq length)
+          if [ "$count" = 0 ]; then
+            echo 'proceed=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        if: steps.guard.outputs.proceed == 'true'
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        if: steps.guard.outputs.proceed == 'true'
+        with:
+          node-version: '24'
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        if: steps.guard.outputs.proceed == 'true'
+      - name: Prepare dependencies, baseline, and trusted tools
+        if: steps.guard.outputs.proceed == 'true'
+        run: |
+          npm ci --prefix tools/javascript --ignore-scripts
+          uv python install 3.10 3.12
+          python tools/starter.py verify
+          cp -R tools "$RUNNER_TEMP/trusted-tools"
+          python tools/agent.py intake --event "$GITHUB_EVENT_PATH" --output .cache/agent/prompt.md
+      - name: Implement issue
+        if: steps.guard.outputs.proceed == 'true'
+        uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675 # v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: .cache/agent/prompt.md
+          output-file: .cache/agent/result.md
+          sandbox: workspace-write
+          safety-strategy: drop-sudo
+      - name: Capture a bounded patch
+        if: steps.guard.outputs.proceed == 'true'
+        id: capture
+        run: |
+          git add --all
+          git diff --cached --exit-code -- starter.json tools/ tests/ .github/ .agents/ AGENTS.md .gitignore .python-version
+          git diff --cached --binary > .cache/agent/change.patch
+          if [ ! -s .cache/agent/change.patch ]; then
+            echo 'Agent produced no changes. Inspect the implementation logs.' >&2
+            exit 1
+          fi
+          python "$RUNNER_TEMP/trusted-tools/agent.py" check-patch --patch .cache/agent/change.patch --root "$GITHUB_WORKSPACE"
+          python "$RUNNER_TEMP/trusted-tools/agent.py" check-staged --root "$GITHUB_WORKSPACE"
+          echo 'has_patch=true' >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.capture.outputs.has_patch == 'true'
+        with:
+          name: candidate-patch
+          path: .cache/agent/change.patch
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  verify:
+    needs: implement
+    if: needs.implement.outputs.has_patch == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: candidate-patch
+          path: .cache/agent/
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Apply and verify in a clean checkout without API credentials
+        run: |
+          python tools/agent.py check-patch --patch .cache/agent/change.patch
+          git apply --index .cache/agent/change.patch
+          python tools/agent.py check-staged
+          npm ci --prefix tools/javascript --ignore-scripts
+          python tools/starter.py verify
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-patch
+          path: .cache/agent/change.patch
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-documentation
+          path: docs/generated/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: verified-patch
+          path: .cache/verified/
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Publish tested change and explicitly start branch CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          patch=.cache/verified/change.patch
+          python tools/agent.py check-patch --patch "$patch"
+          git apply --index "$patch"
+          python tools/agent.py check-staged
+          branch="agent/issue-$ISSUE_NUMBER"
+          git switch -c "$branch"
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Resolve issue #$ISSUE_NUMBER"
+          gh auth setup-git
+          git push origin "$branch"
+          python -c 'import os; from pathlib import Path; Path(".cache/pr.md").write_text("Closes #" + os.environ["ISSUE_NUMBER"] + "\n\nImplemented from the issue acceptance criteria. A fresh verification job passed all starter and project tests, checked the actual runtimes, and regenerated documentation. See this workflow run for evidence.\n")'
+          gh pr create --head "$branch" --title "Resolve issue #$ISSUE_NUMBER" --body-file .cache/pr.md
+          gh workflow run ci.yml --ref "$branch"

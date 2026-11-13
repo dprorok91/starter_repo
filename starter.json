@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "projects": [
+    {
+      "id": "python-demo",
+      "language": "python",
+      "root": "examples/python310",
+      "checks": [["uv", "run", "--locked", "python", "-m", "unittest", "discover", "-s", "tests", "-v"]]
+    },
+    {
+      "id": "javascript-demo",
+      "language": "javascript",
+      "root": "examples/javascript",
+      "checks": [["npm", "test"]]
+    }
+  ]
+}
