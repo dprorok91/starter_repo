@@ -37,7 +37,7 @@ jobs:
           if [ "$count" = 0 ]; then
             echo 'proceed=true' >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         if: steps.guard.outputs.proceed == 'true'
         with:
           python-version: '3.12'
@@ -100,7 +100,7 @@ jobs:
         with:
           name: candidate-patch
           path: .cache/agent/
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -144,7 +144,7 @@ jobs:
         with:
           name: verified-patch
           path: .cache/verified/
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - name: Publish tested change and explicitly start branch CI
